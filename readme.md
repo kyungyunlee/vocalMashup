@@ -7,7 +7,8 @@ All the algorithms are from [librosa](https://librosa.github.io/librosa/).
 
 ### How to use 
 I added some test audios from online and [musdb18](https://sigsep.github.io/datasets/musdb.html).   
-Put background tracks you want to mash into `background_tracks` directory. 
+1. Put background tracks you want to mash into `background_tracks` directory. 
+2. Run the following
 ```
 python mashability.py test_vocal.wav
 ```
@@ -19,4 +20,3 @@ python mashability.py test_vocal.wav
 
 ### Projects using this code
 * "Learning a Joint Embedding Space of Monophonic and Mixed Music Signals for Singing Voice" - Kyungyun Lee, Juhan Nam, ISMIR 2019
-
