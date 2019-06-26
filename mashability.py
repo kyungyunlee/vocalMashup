@@ -1,16 +1,18 @@
 '''
-Given a single vocal recording and a list of background recordings, select the "mashable" background tracks with the vocal recording. 
+Given a single vocal recording and a list of background recordings, 
+select the "mashable" background tracks with the vocal recording. 
 '''
 import os
 import sys
 import librosa
-import madmom
 import random
 import numpy as np
 import scipy
 import pickle
 from pathlib import Path
 from multiprocessing import Pool
+
+NUM_PARALLEL = 4
 
 AUDIO_PARAMS = {
         'sr': 22050,
@@ -20,16 +22,16 @@ AUDIO_PARAMS = {
         'n_chroma': 12
         }
 
-MAJOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#','B']
-MINOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#','B']
+MAJOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+MINOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 MAJ_MIN_RELATIVES = {'B': 'G#',
                      'F#': 'D#',
-                     'C#':'A#',
-                     'G#':'F',
+                     'C#': 'A#',
+                     'G#': 'F',
                      'D#': 'C',
                      'A#': 'G',
-                     'F': 'D', 
-                     'C':'A',
+                     'F':  'D', 
+                     'C': 'A',
                      'G': 'E',
                      'D': 'B',
                      'A': 'F#',
@@ -40,26 +42,25 @@ MAJ_MIN_RELATIVES = {'B': 'G#',
 MIN_MAJ_RELATIVES = {v:k for k,v in MAJ_MIN_RELATIVES.items()}
 
 
+
 def vocal_detection(y, input_frame_len, input_hop_len):
     rmse = librosa.feature.rmse(y, frame_length=AUDIO_PARAMS['frame_length'], hop_length=AUDIO_PARAMS['hop_length'], center=True)
     rmse = rmse[0]
 
     threshold = 0.04
-    
     vocal_segments = np.where(rmse>threshold)[0]
-    binary = rmse>threshold * 1
+    binary = rmse > threshold * 1
     vocal_segments = [] 
 
     for i in range(0, binary.shape[0], input_hop_len):
         curr_segment = binary[i:i+input_frame_len]
         vocal_ratio = np.sum(curr_segment) / input_frame_len
-        if vocal_ratio > 0.8 :
+        if vocal_ratio > 0.8: 
             start_time = librosa.frames_to_samples(i, hop_length=AUDIO_PARAMS['hop_length'])
             # vocal_segments.append(round(start_time, 2))
             vocal_segments.append(start_time)
 
     return vocal_segments 
-
 
 
 def ks_key(X):
@@ -77,7 +78,6 @@ def ks_key(X):
     minor = scipy.linalg.circulant(minor)
 
     return major.T.dot(X), minor.T.dot(X)
-
 
 
 def compute_beat(y):
@@ -98,52 +98,57 @@ def compute_key(y):
          key_idx = np.argmax(maj_key)
          key = MAJOR[key_idx]
          ismajor = True
-    else : 
+    else: 
         key_idx = np.argmax(min_key)
         key = MINOR[key_idx]
         ismajor = False
-
 
     return key, ismajor
 
 
 def bg_handler(bg_track, duration=3.0):
-
-    bg_y, _ = librosa.load(str(bg_track), sr=AUDIO_PARAMS['sr'])
+    ''' Parallel function to calculate background track info for multiprocessing
+    Args:
+        bg_track : path to background track
+        duration : duration of the signal to compute info (key, onset)
+    Returns :
+        bg_track : path to the background track
+        y : 1-D signal of the track. shape=(length_of_y,)
+        tempo : tempo of the track. (single value, float) 
+        beat : onsets of the track in seconds. (list of time stamps) 
+    '''
+    print ('processing..', bg_track)
+    bg_y, _ = librosa.load(str(bg_track), sr=AUDIO_PARAMS['sr']) 
     bg_tempo_beat = compute_beat(bg_y)
     segment_key = {} 
-    for onset_sample in bg_tempo_beat['beat'] : 
+    for onset_sample in bg_tempo_beat['beat']: 
         seg = bg_y[onset_sample : onset_sample + int(duration * AUDIO_PARAMS['sr'])]
         key, ismajor = compute_key(seg)
         if len(seg) == int(duration * AUDIO_PARAMS['sr']): 
             segment_key[onset_sample]  = (key, ismajor)
-    print (bg_track)
     return bg_track, {'y':bg_y, 'tempo': bg_tempo_beat['tempo'], 'beat': segment_key}
-
 
 
 def precompute_bg_info(bg_dir, duration=3.0):
     
     list_of_bg = [bg_track for bg_track in Path(bg_dir).glob('*.wav')]
-    '''
-    with Pool(4) as p : 
-        # for result in p.imap_unordered(bg_handler, list_of_bg):
-        # print (result)
+    with Pool(NUM_PARALLEL) as p : 
         res = p.map(bg_handler, list_of_bg)
     
     bg_info = {} 
     for result in res : 
         bg_info[result[0]] = result[1]
+        # print (result[0])
+        # print(result[1]['tempo'])
+
     '''
     bg_info = {}
     for bg_track in list_of_bg:
         result = bg_handler(bg_track, duration)
         bg_info[result[0]] = result[1]
-
+    '''
     print('saving to bg_info.pkl')
     pickle.dump(bg_info, open('bg_info.pkl', 'wb'))
-
-
 
 
 def compute_loudness(y):
@@ -158,8 +163,6 @@ def compute_loudness(y):
     rms_filter = rms[rms_filter_ind]
     mean_rms = np.mean(rms_filter)
     return mean_rms
-
-
 
 
 def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
@@ -182,13 +185,11 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
     # tempo, beat detection
     vocal_tempo_beat = compute_beat(vocal_y)
     print ('Vocal track tempo:', vocal_tempo_beat['tempo'])
-    # print (vocal_tempo_beat['beat'])
 
     # vocal detection 
     vocal_segments = vocal_detection(vocal_y, input_frame_len, input_hop_len) 
     # print (vocal_segments) 
     vocal_segments = vocal_segments[:num_segments]
-    
     
     # load bg info 
     if os.path.exists('bg_info.pkl'):
@@ -200,7 +201,6 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
         print ('Done. Run the script again')
         sys.exit()
 
-
     # find bg track with same (or similar tempo)
     list_of_bg = [bg_track for bg_track in Path(bg_dir).glob('*.wav')]
     random.shuffle(list_of_bg)
@@ -208,13 +208,13 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
     near_tempo = [] 
     for bg_track in list_of_bg:
         bg_track_info= bg_info[bg_track]
-        if bg_track_info['tempo']== vocal_tempo_beat['tempo'] : 
+        if bg_track_info['tempo'] == vocal_tempo_beat['tempo'] : 
             same_tempo.append((bg_track, bg_track_info))
         elif abs(bg_track_info['tempo'] - vocal_tempo_beat['tempo']) < 4: 
             near_tempo.append((bg_track, bg_track_info))
 
     if len(same_tempo) == 0 and len(near_tempo) == 0 : 
-        print ("no  matching background music found for given vocal recording's tempo..try finding more background tracks.")
+        print ("No  matching background music found for given vocal recording's tempo. Try finding more background tracks!")
         return 
 
     else :
@@ -270,20 +270,12 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
                         matching_pair_found = True
                 break
 
-            
             if not matching_pair_found :
                 print ("no matching pair")
             else:      
-                # print (matching_pair_result)
                 print ("success")
 
-                
-
         return matching_pair_result 
-
-
-
-
 
 
 def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
@@ -333,10 +325,6 @@ def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
         output_gain = compute_loudness(output)
 
     return output 
-        
-
-
-
 
 
 if __name__ == '__main__':
@@ -349,19 +337,18 @@ if __name__ == '__main__':
 
     vocal_path = sys.argv[1]
     bg_dir = 'background_tracks'
-    # vocal_path = '/Users/klee/Downloads/DAMP_audio/100254873_32741941.m4a'
+
+    # vocal_path = '/Users/klee/Downloads/DAMP_audio/101564001_30659121.m4a'
     # bg_dir = '/Users/klee/Downloads/musdb_inst'
 
     mashability_result = find_mashup_pairs(vocal_path, bg_dir) 
 
     if not os.path.exists('output'):
         os.makedirs('output')
-    
-    for start_sample, (bg_track, (bg_start_sample, bg_key, bg_ismajor)) in mashability_result.items(): 
-        print (start_sample, bg_track, bg_start_sample)
-        mixed_output = mash(vocal_path, start_sample, bg_track, bg_start_sample, 3.0)
-        librosa.output.write_wav(os.path.join('output', Path(vocal_path).stem + '_' + str(start_sample) +'.wav'), mixed_output, sr=AUDIO_PARAMS['sr'])
 
-
-
-
+    if mashability_result  :
+        
+        for start_sample, (bg_track, (bg_start_sample, bg_key, bg_ismajor)) in mashability_result.items(): 
+            print (start_sample, bg_track, bg_start_sample)
+            mixed_output = mash(vocal_path, start_sample, bg_track, bg_start_sample, 3.0)
+            librosa.output.write_wav(os.path.join('output', Path(vocal_path).stem + '_' + str(start_sample) +'.wav'), mixed_output, sr=AUDIO_PARAMS['sr'])
