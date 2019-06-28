@@ -1,6 +1,8 @@
 # vocalMashup
 Creates a mashup from a given vocal recording and a list of background instrumental tracks. 
 
+NOTE : The mashup pipeline is very rudimentary. If you use better algorithms for tempo detection, key detection, the result will be much better :) 
+
 ### How it works 
 Computes tempo, beat and key from vocal and background tracks to find the best match.   
 All the algorithms are from [librosa](https://librosa.github.io/librosa/).  
@@ -19,6 +21,6 @@ python mashability.py test_vocal.wav
 
 
 ### Projects using this code
-* "Learning a Joint Embedding Space of Monophonic and Mixed Music Signals for Singing Voice" - Kyungyun Lee, Juhan Nam, ISMIR 2019 ([link](https://github.com/kyungyunlee/mono2mixed-singer/))
+* "Learning a Joint Embedding Space of Monophonic and Mixed Music Signals for Singing Voice" - Kyungyun Lee, Juhan Nam, ISMIR 2019 ([pdf](https://arxiv.org/abs/1906.11139), [github](https://github.com/kyungyunlee/mono2mixed-singer/))
 
 
