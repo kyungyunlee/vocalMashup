@@ -43,11 +43,11 @@ MIN_MAJ_RELATIVES = {v:k for k,v in MAJ_MIN_RELATIVES.items()}
 
 
 
-def vocal_detection(y, input_frame_len, input_hop_len):
-    rmse = librosa.feature.rmse(y, frame_length=AUDIO_PARAMS['frame_length'], hop_length=AUDIO_PARAMS['hop_length'], center=True)
+def vocal_detection(y, input_frame_len, input_hop_len, min_threshold=0.01):
+    rmse = librosa.feature.rms(y, frame_length=AUDIO_PARAMS['frame_length'], hop_length=AUDIO_PARAMS['hop_length'], center=True)
     rmse = rmse[0]
 
-    threshold = 0.04
+    threshold = min_threshold
     vocal_segments = np.where(rmse>threshold)[0]
     binary = rmse > threshold * 1
     vocal_segments = [] 
@@ -151,16 +151,21 @@ def precompute_bg_info(bg_dir, duration=3.0):
     pickle.dump(bg_info, open('bg_info.pkl', 'wb'))
 
 
-def compute_loudness(y):
+def compute_loudness(y, min_threshold=0.01):
     '''
     Args : 
         y : audio signal in samples
+        min_threshold : to remove the silent frames, set minimum rms value.
     Return : 
         mean_rms : (float) 
     '''
-    rms = librosa.feature.rmse(y=y, frame_length=AUDIO_PARAMS['frame_length'])
-    rms_filter_ind = np.where(rms >= 0.04)
-    rms_filter = rms[rms_filter_ind]
+    rms = librosa.feature.rms(y=y, frame_length=AUDIO_PARAMS['frame_length'], hop_length=AUDIO_PARAMS['hop_length'])
+    rms = rms[0] 
+    rms_filter_ind = np.where(rms >= min_threshold)[0]
+    rms_filter = rms[ rms_filter_ind]
+    if len(rms_filter) == 0 : 
+        print ("Threshold is set too high or the audio is very quiet. Setting loudness value to 0.0") 
+        return 0.0
     mean_rms = np.mean(rms_filter)
     return mean_rms
 
@@ -190,6 +195,8 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
     vocal_segments = vocal_detection(vocal_y, input_frame_len, input_hop_len) 
     # print (vocal_segments) 
     vocal_segments = vocal_segments[:num_segments]
+    
+    print ('number of vocal segments:', len(vocal_segments))
     
     # load bg info 
     if os.path.exists('bg_info.pkl'):
@@ -278,7 +285,7 @@ def find_mashup_pairs(vocal_path, bg_dir, duration=3.0, num_segments=10):
         return matching_pair_result 
 
 
-def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
+def mash(vocal_path, vocal_start, bg_path, bg_start, duration, min_rms=0.2, max_rms=0.4):
     '''
     Mix vocal and background tracks at the corresponding segment. 
     Args: 
@@ -287,6 +294,8 @@ def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
         bg_path: path to background track 
         bg_start : onset in samples for background segment 
         duration : duration of the mix
+        min_rms : minimum rms value of the mashed track. Mashed tracks will have rms value higher than this. 
+        max_rms : maximum rms value of the mashed track. Mashed tracks will have rms value lower than this. 
     Return : 
         output : mixed signal in samples 
     '''
@@ -301,11 +310,11 @@ def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
     bg_gain = compute_loudness(bg_y)
     print (vocal_gain, bg_gain)
     
-    while bg_gain < 0.3:
+    while bg_gain < min_rms:
         bg_y *= 1.1 
         bg_gain = compute_loudness(bg_y)
 
-    while vocal_gain < 0.3 : 
+    while vocal_gain < min_rms : 
         vocal_y *= 1.1
         vocal_gain = compute_loudness(vocal_y)
 
@@ -320,7 +329,7 @@ def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
     output_gain = compute_loudness(output)
     print ("output gain", output_gain)
     
-    while output_gain > 0.5 : 
+    while output_gain > max_rms : 
         output = output / 1.1
         output_gain = compute_loudness(output)
 
@@ -328,6 +337,7 @@ def mash(vocal_path, vocal_start, bg_path, bg_start, duration):
 
 
 if __name__ == '__main__':
+
     if len(sys.argv) != 2 : 
         print ("Insufficienty argument: You need to identify path to vocal recording")
         sys.exit()
